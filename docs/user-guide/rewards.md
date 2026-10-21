@@ -125,8 +125,8 @@ bf16, and an fp32 head. `tests/fast-gpu/test_hpsv3_alignment.py` checks it again
 with the official package (`tests/fixtures/gen_hpsv3_reference.py`): identical model inputs, μ within
 1e-3 with the backbone in fp32, and within the cross-release bf16 kernel noise (≈0.1) as deployed.
 
-μ is an unbounded logit: about 7–11 on the official repo's example images and −9 to +2 on
-synthetic patterns. It accepts image outputs only (one frame).
+μ is an unbounded logit: on SD3.5-medium GRPO rollouts (512², 10 steps) it spanned about −10 to
++16 with a per-rollout mean of 8–10 and std 5–6. It accepts image outputs only (one frame).
 
 | Flag | Default | Description |
 |---|---|---|
@@ -185,7 +185,7 @@ The example returns a dict per sample (`{"hps": ..., "pickscore": ..., "weighted
 `--reward-key` picks the entry GRPO trains on, and every entry of a dict reward gets its own
 `rollout/reward/<name>_mean` panel, so the components stay visible while the sum is optimized.
 
-Weights apply to raw scores (HPSv2.1 ≈ 0.25–0.35, HPSv3 μ unbounded and roughly −10 to +12,
+Weights apply to raw scores (HPSv2.1 ≈ 0.25–0.35, HPSv3 μ unbounded and roughly −10 to +16,
 PickScore/26 ≈ 0.8–0.9, OCR ∈ [0, 1], default OpenAI API rubric ∈ [0, 4]), so pick them with the
 scales in mind. A zero weight keeps a reward as a monitor only, e.g.
 `--custom-rm-args "hpsv3=1.0,hps=0,pickscore=0" --reward-key hpsv3` trains on HPSv3 and plots the

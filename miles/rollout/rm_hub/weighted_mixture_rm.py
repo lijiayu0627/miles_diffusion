@@ -23,12 +23,14 @@ from miles.utils.types import Sample
 
 from .api import custom_api_rm
 from .hps import hps_rm
+from .hpsv3 import hpsv3_rm
 from .ocr import ocr_rm
 from .openai_api import openai_api_rm
 from .pickscore import pickscore_rm
 
 _REWARDS = {
     "hps": hps_rm,
+    "hpsv3": hpsv3_rm,
     "pickscore": pickscore_rm,
     "ocr": ocr_rm,
     "custom_api": custom_api_rm,

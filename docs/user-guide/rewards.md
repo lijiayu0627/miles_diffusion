@@ -127,7 +127,7 @@ with the official package (`tests/fixtures/gen_hpsv3_reference.py`): identical m
 1e-3 with the backbone in fp32, and within the cross-release bf16 kernel noise (≈0.1) as deployed.
 
 μ is an unbounded logit: on SD3.5-medium GRPO rollouts (512², 10 steps) it spanned about −10 to
-+16 with a per-rollout mean of 8–10 and std 5–6. It accepts image outputs only (one frame).
++16 with a per-rollout mean of 8–13 and std 5–6. It accepts image outputs only (one frame).
 
 | Flag | Default | Description |
 |---|---|---|
@@ -147,7 +147,7 @@ Example from `scripts/run_diffusion_grpo_sd3_hpsv3_sglang.py`:
 
 ```bash
 --rm-type hpsv3 \
---hpsv3-num-workers 1 \
+--hpsv3-num-workers 2 \
 --hpsv3-batch-size 8 \
 --hpsv3-reward-colocate
 ```

@@ -110,7 +110,8 @@ Implementation: `miles/rollout/rm_hub/hpsv3.py`.
 
 [HPSv3](https://github.com/MizzenAI/HPSv3) is Qwen2-VL-7B-Instruct fine-tuned as a preference model:
 the image and a fixed rubric containing the prompt end in a `<|Reward|>` token, and a small MLP
-head on that token's hidden state outputs a preference mean μ and an uncertainty σ. The reward is μ.
+head on that token's hidden state outputs a preference mean μ and an uncertainty σ. The reward is μ, as in the official
+inferencer; σ is unused.
 
 - Weights: `MizzenAI/HPSv3` (`HPSv3.safetensors`, full bf16 model), or `--hpsv3-checkpoint-path`
 - Config / tokenizer / processor: `--hpsv3-base-model-path` (default `Qwen/Qwen2-VL-7B-Instruct`;

@@ -24,7 +24,7 @@ _spec = importlib.util.spec_from_file_location("gen_hpsv3_reference", _FIXTURES 
 _gen = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_gen)
 
-# Inputs match exactly. With the backbone cast to fp32 the port reproduces the official mu to ~1e-4, so
+# Inputs match exactly. With the backbone cast to fp32 the port reproduces the official mu (0.0000 apart), so
 # the fp32 check is the strict one; the bf16 path differs only by kernel noise across torch/transformers
 # releases (up to ~0.1 here), about as large as the official model's own single-vs-batched spread (0.13).
 _MU_ATOL_FP32 = 1e-3
@@ -74,19 +74,16 @@ def test_bf16_scores_match_official(scorer):
 
 
 def test_fp32_scores_match_official(scorer):
-    """Same bf16-rounded weights and rotary buffers in fp32 math: a wrong layer, mask or rotary shows up here.
-
-    Runs last in the module: it casts the shared scorer's backbone to fp32.
-    """
-    scorer.model.float()
+    """Same bf16-rounded weights and rotary buffers in fp32 math: a wrong layer, mask or rotary shows up here."""
     samples, images = zip(*_samples(), strict=True)
+    scorer.model.float()
+    try:
+        mu = [scorer([s["prompt"]], [image])[0] for s, image in zip(samples, images, strict=True)]
+    finally:
+        # every value is bf16-representable, so casting back restores the shared scorer exactly
+        scorer.model.to(torch.bfloat16)
 
-    _assert_mu_close(
-        [scorer([s["prompt"]], [image])[0] for s, image in zip(samples, images, strict=True)],
-        samples,
-        "mu_fp32",
-        _MU_ATOL_FP32,
-    )
+    _assert_mu_close(mu, samples, "mu_fp32", _MU_ATOL_FP32)
 
 
 if __name__ == "__main__":

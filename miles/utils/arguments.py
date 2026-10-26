@@ -1518,12 +1518,6 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 default=None,
                 help="Optional local HPSv3.safetensors; otherwise download it from MizzenAI/HPSv3.",
             )
-            parser.add_argument(
-                "--hpsv3-base-model-path",
-                type=str,
-                default="Qwen/Qwen2-VL-7B-Instruct",
-                help="Model whose config, tokenizer and processor HPSv3 is built from (its weights are not loaded).",
-            )
 
             parser.add_argument(
                 "--rm-url",

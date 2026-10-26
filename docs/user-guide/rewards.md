@@ -114,9 +114,10 @@ head on that token's hidden state outputs a preference mean μ and an uncertaint
 inferencer; σ is unused.
 
 - Weights: `MizzenAI/HPSv3` (`HPSv3.safetensors`, full bf16 model), or `--hpsv3-checkpoint-path`
-- Config / tokenizer / processor: `--hpsv3-base-model-path` (default `Qwen/Qwen2-VL-7B-Instruct`;
-  its weights are not loaded). The checkpoint repo's own `config.json` says Qwen2.5-VL but the
-  weights are Qwen2-VL, so it is not used.
+- Config / tokenizer / processor: `Qwen/Qwen2-VL-7B-Instruct` (its weights are not loaded). The
+  checkpoint repo has none of these, and its own `config.json` says Qwen2.5-VL while the weights are
+  Qwen2-VL. Offline, cache those Qwen2-VL files (not its weights) in the Hugging Face cache and set
+  `HF_HUB_OFFLINE=1`.
 - Images are resized to ~256 visual tokens (`256·28·28` pixels, aspect ratio kept).
 
 The official package pins `transformers==4.45.2`, so this is a port onto miles' transformers
@@ -135,7 +136,6 @@ with the official package (`tests/fixtures/gen_hpsv3_reference.py`): identical m
 | `--hpsv3-num-gpus-per-worker` | 1.0 | GPU per worker (non-colocate) |
 | `--hpsv3-batch-size` | 8 | Batch size per actor call |
 | `--hpsv3-checkpoint-path` | None | Local `HPSv3.safetensors`; unset downloads from `MizzenAI/HPSv3` |
-| `--hpsv3-base-model-path` | `Qwen/Qwen2-VL-7B-Instruct` | Config, tokenizer and processor source |
 | `--hpsv3-reward-colocate` | False | Seat the `--hpsv3-num-workers` actors on rollout GPUs, one per placement-group bundle (requires `--colocate`) |
 
 Each worker keeps ~14.5 GiB of weights resident; on an H100 with sdpa a call takes ~65 ms at batch

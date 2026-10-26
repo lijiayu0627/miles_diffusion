@@ -22,8 +22,9 @@ from .core import AsyncRewardActorPool, record_reward_queue_depth
 
 _HPSV3_REPO = "MizzenAI/HPSv3"
 _HPSV3_FILENAME = "HPSv3.safetensors"
-# the checkpoint's own config.json says Qwen2.5-VL, but the weights are Qwen2-VL; the official code builds from this
-DEFAULT_BASE_MODEL = "Qwen/Qwen2-VL-7B-Instruct"
+# config, tokenizer and processor (not weights): the checkpoint repo has none of them, and its config.json says
+# Qwen2.5-VL while the weights are Qwen2-VL; the official code builds from this
+_BASE_MODEL = "Qwen/Qwen2-VL-7B-Instruct"
 _REWARD_TOKEN = "<|Reward|>"
 _PIXELS = 256 * 28 * 28
 _FACTOR = 28
@@ -113,7 +114,6 @@ class HPSv3Scorer(torch.nn.Module):
         *,
         device: str = "cuda",
         checkpoint_path: str | None = None,
-        base_model_path: str = DEFAULT_BASE_MODEL,
     ) -> None:
         super().__init__()
         import huggingface_hub
@@ -124,14 +124,14 @@ class HPSv3Scorer(torch.nn.Module):
         from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLModel
 
         self.device = torch.device(device)
-        self.processor = AutoProcessor.from_pretrained(base_model_path, padding_side="right")
+        self.processor = AutoProcessor.from_pretrained(_BASE_MODEL, padding_side="right")
         # transformers 4.45 (the official reference) only had the PIL-based image processor
-        self.processor.image_processor = Qwen2VLImageProcessorPil.from_pretrained(base_model_path)
+        self.processor.image_processor = Qwen2VLImageProcessorPil.from_pretrained(_BASE_MODEL)
         tokenizer = self.processor.tokenizer
         tokenizer.add_tokens([AddedToken(_REWARD_TOKEN, special=True, normalized=False)], special_tokens=True)
         self.reward_token_id = tokenizer.convert_tokens_to_ids(_REWARD_TOKEN)
 
-        config = AutoConfig.from_pretrained(base_model_path)
+        config = AutoConfig.from_pretrained(_BASE_MODEL)
         config.text_config.vocab_size = len(tokenizer)
         with torch.device(self.device):
             # the official model uses flash-attn 2 when installed and sdpa otherwise (both exact attention);
@@ -207,10 +207,7 @@ class AsyncHPSv3Pool(AsyncRewardActorPool, metaclass=SingletonMeta):
     def __init__(self, args, placement_group=None, slots=None) -> None:
         super().__init__(
             actor_cls=HPSv3RewardActor,
-            actor_kwargs={
-                "checkpoint_path": args.hpsv3_checkpoint_path,
-                "base_model_path": args.hpsv3_base_model_path,
-            },
+            actor_kwargs={"checkpoint_path": args.hpsv3_checkpoint_path},
             num_workers=args.hpsv3_num_workers,
             batch_size=args.hpsv3_batch_size,
             num_gpus_per_worker=args.hpsv3_num_gpus_per_worker,

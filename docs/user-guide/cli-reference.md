@@ -314,7 +314,6 @@ See [Dtype Control](../advanced/dtype-control.md).
 | `--hpsv3-reward-colocate` | flag | off | Seats `--hpsv3-num-workers` actors on the rollout GPUs, one per placement-group bundle, sharing them with the train actor and rollout engine. Requires `--colocate`. Each actor keeps ~14.5 GiB resident there, which Ray does not account for. |
 | `--hpsv3-batch-size` | int | `8` | |
 | `--hpsv3-checkpoint-path` | str | – | Local `HPSv3.safetensors`; unset downloads from `MizzenAI/HPSv3`. |
-| `--hpsv3-base-model-path` | str | `Qwen/Qwen2-VL-7B-Instruct` | Config, tokenizer and processor source; its weights are not loaded. |
 | `--ocr-num-workers` | int | `4` | |
 | `--rollout-parser-num-workers` | int | `1` | Ray actors deserializing rollout responses. Raise when trajectory tensors are large. |
 | `--rollout-fetch-in-parser` | flag | off | Parser actors pick the least-loaded engine through the miles router, then fetch and parse its response in place, skipping the router's data plane and the manager's event loop. Requires `--use-miles-router` and at least as many parser workers as concurrency slots. |

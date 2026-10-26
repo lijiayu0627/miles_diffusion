@@ -37,7 +37,7 @@ def _sha256(tensor: torch.Tensor) -> str:
 
 @pytest.fixture(scope="module")
 def scorer():
-    return HPSv3Scorer(device="cuda", attn_implementation="sdpa")
+    return HPSv3Scorer(device="cuda")
 
 
 def _samples():

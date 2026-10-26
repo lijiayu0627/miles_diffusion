@@ -1524,13 +1524,6 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 default="Qwen/Qwen2-VL-7B-Instruct",
                 help="Model whose config, tokenizer and processor HPSv3 is built from (its weights are not loaded).",
             )
-            parser.add_argument(
-                "--hpsv3-attn-implementation",
-                type=str,
-                default="sdpa",
-                choices=["sdpa", "flash_attention_2", "eager"],
-                help="Attention backend of the HPSv3 Qwen2-VL; sdpa is what the alignment test is recorded against.",
-            )
 
             parser.add_argument(
                 "--rm-url",

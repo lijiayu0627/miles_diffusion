@@ -114,7 +114,6 @@ class HPSv3Scorer(torch.nn.Module):
         device: str = "cuda",
         checkpoint_path: str | None = None,
         base_model_path: str = DEFAULT_BASE_MODEL,
-        attn_implementation: str = "sdpa",
     ) -> None:
         super().__init__()
         import huggingface_hub
@@ -135,9 +134,9 @@ class HPSv3Scorer(torch.nn.Module):
         config = AutoConfig.from_pretrained(base_model_path)
         config.text_config.vocab_size = len(tokenizer)
         with torch.device(self.device):
-            self.model = Qwen2VLModel._from_config(
-                config, attn_implementation=attn_implementation, dtype=torch.bfloat16
-            )
+            # the official model uses flash-attn 2 when installed and sdpa otherwise (both exact attention);
+            # the alignment test is recorded on sdpa
+            self.model = Qwen2VLModel._from_config(config, attn_implementation="sdpa", dtype=torch.bfloat16)
             # dtype= leaves the rotary inv_freq buffers fp32, but HPSv3 was trained and is scored after
             # model.to(bfloat16), which rounds them to bf16; keeping them fp32 shifts mu by up to ~0.2
             self.model.to(torch.bfloat16)
@@ -211,7 +210,6 @@ class AsyncHPSv3Pool(AsyncRewardActorPool, metaclass=SingletonMeta):
             actor_kwargs={
                 "checkpoint_path": args.hpsv3_checkpoint_path,
                 "base_model_path": args.hpsv3_base_model_path,
-                "attn_implementation": args.hpsv3_attn_implementation,
             },
             num_workers=args.hpsv3_num_workers,
             batch_size=args.hpsv3_batch_size,

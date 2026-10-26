@@ -136,7 +136,6 @@ with the official package (`tests/fixtures/gen_hpsv3_reference.py`): identical m
 | `--hpsv3-batch-size` | 8 | Batch size per actor call |
 | `--hpsv3-checkpoint-path` | None | Local `HPSv3.safetensors`; unset downloads from `MizzenAI/HPSv3` |
 | `--hpsv3-base-model-path` | `Qwen/Qwen2-VL-7B-Instruct` | Config, tokenizer and processor source |
-| `--hpsv3-attn-implementation` | `sdpa` | `sdpa` / `flash_attention_2` / `eager` |
 | `--hpsv3-reward-colocate` | False | Seat the `--hpsv3-num-workers` actors on rollout GPUs, one per placement-group bundle (requires `--colocate`) |
 
 Each worker keeps ~14.5 GiB of weights resident; on an H100 with sdpa a call takes ~65 ms at batch

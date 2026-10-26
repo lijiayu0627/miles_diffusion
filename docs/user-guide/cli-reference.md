@@ -315,7 +315,6 @@ See [Dtype Control](../advanced/dtype-control.md).
 | `--hpsv3-batch-size` | int | `8` | |
 | `--hpsv3-checkpoint-path` | str | – | Local `HPSv3.safetensors`; unset downloads from `MizzenAI/HPSv3`. |
 | `--hpsv3-base-model-path` | str | `Qwen/Qwen2-VL-7B-Instruct` | Config, tokenizer and processor source; its weights are not loaded. |
-| `--hpsv3-attn-implementation` | enum | `sdpa` | `sdpa` / `flash_attention_2` / `eager`. The alignment test is recorded with `sdpa`. |
 | `--ocr-num-workers` | int | `4` | |
 | `--rollout-parser-num-workers` | int | `1` | Ray actors deserializing rollout responses. Raise when trajectory tensors are large. |
 | `--rollout-fetch-in-parser` | flag | off | Parser actors pick the least-loaded engine through the miles router, then fetch and parse its response in place, skipping the router's data plane and the manager's event loop. Requires `--use-miles-router` and at least as many parser workers as concurrency slots. |

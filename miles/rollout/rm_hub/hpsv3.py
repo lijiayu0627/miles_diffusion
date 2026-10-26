@@ -1,8 +1,8 @@
-"""HPSv3 reward: Qwen2-VL-7B with a preference head, ported from MizzenAI/HPSv3 to this transformers.
+"""HPSv3 reward (MizzenAI/HPSv3): Qwen2-VL-7B-Instruct fine-tuned as a human preference model.
 
-The official package pins transformers 4.45 and copies that release's Qwen2-VL forward, so this
-module rebuilds the same computation on the pinned transformers instead of importing it;
-tests/fast-gpu/test_hpsv3_alignment.py checks it against scores recorded with the official code.
+The image and a fixed rubric containing the prompt form one user turn ending in a ``<|Reward|>``
+token; an MLP head on that token's last hidden state outputs a preference mean and an uncertainty
+(mu, sigma), and the reward is mu.
 """
 
 from __future__ import annotations

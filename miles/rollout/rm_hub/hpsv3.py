@@ -80,7 +80,7 @@ def _smart_resize(height: int, width: int) -> tuple[int, int]:
 
 
 def split_official_state_dict(state_dict: dict[str, torch.Tensor]) -> tuple[dict, dict]:
-    """Map the official (transformers 4.45 Qwen2VLForConditionalGeneration) keys onto Qwen2VLModel and the head."""
+    """Map the official checkpoint keys onto Qwen2VLModel and the head; lm_head is not used for scoring."""
     model_state, head_state = {}, {}
     for key, value in state_dict.items():
         if key.startswith("model."):
@@ -95,7 +95,7 @@ def split_official_state_dict(state_dict: dict[str, torch.Tensor]) -> tuple[dict
 
 
 def _build_rm_head(hidden_size: int) -> torch.nn.Sequential:
-    # the official ranknet head without rm_head_kwargs; indices 0/3/5 match the checkpoint
+    # same layers as the official head; the checkpoint holds weights for indices 0, 3 and 5
     return torch.nn.Sequential(
         torch.nn.Linear(hidden_size, 1024),
         torch.nn.ReLU(),
@@ -125,22 +125,26 @@ class HPSv3Scorer(torch.nn.Module):
 
         self.device = torch.device(device)
         self.processor = AutoProcessor.from_pretrained(_BASE_MODEL, padding_side="right")
-        # transformers 4.45 (the official reference) only had the PIL-based image processor
+        # the official implementation preprocesses with the PIL image processor, not the torchvision one that
+        # transformers now defaults to; use it too so the pixel values match exactly
         self.processor.image_processor = Qwen2VLImageProcessorPil.from_pretrained(_BASE_MODEL)
         tokenizer = self.processor.tokenizer
+        # <|Reward|> is one added special token, as in the official implementation; the score is read at it
         tokenizer.add_tokens([AddedToken(_REWARD_TOKEN, special=True, normalized=False)], special_tokens=True)
         self.reward_token_id = tokenizer.convert_tokens_to_ids(_REWARD_TOKEN)
 
         config = AutoConfig.from_pretrained(_BASE_MODEL)
+        # one more embedding row for <|Reward|>, matching the checkpoint
         config.text_config.vocab_size = len(tokenizer)
         with torch.device(self.device):
-            # the official model uses flash-attn 2 when installed and sdpa otherwise (both exact attention);
-            # the alignment test is recorded on sdpa
+            # the official implementation uses flash-attn 2 when installed and sdpa otherwise; we always use
+            # sdpa, which the alignment test checks against the official scores
             self.model = Qwen2VLModel._from_config(config, attn_implementation="sdpa", dtype=torch.bfloat16)
-            # dtype= leaves the rotary inv_freq buffers fp32, but HPSv3 was trained and is scored after
-            # model.to(bfloat16), which rounds them to bf16; keeping them fp32 shifts mu by up to ~0.2
+            # the official implementation casts the whole model to bf16 after building it, which also rounds the
+            # rotary position frequencies (inv_freq buffers) to bf16; dtype= above keeps them fp32, which would
+            # shift mu by up to ~0.2, so cast the same way
             self.model.to(torch.bfloat16)
-            # the official head stays fp32 and its fp32 autocast upcasts the bf16 hidden state
+            # the head stays fp32 as in the official implementation; forward feeds it the hidden state in fp32
             self.rm_head = _build_rm_head(config.text_config.hidden_size)
 
         if checkpoint_path is None:
@@ -165,7 +169,8 @@ class HPSv3Scorer(torch.nn.Module):
     def forward(self, prompts: Sequence[str], images: Sequence[Image.Image]) -> list[float]:
         inputs = self.build_inputs(prompts, images).to(self.device)
         input_ids = inputs["input_ids"]
-        # HPSv3 was trained without M-RoPE: every token uses its sequence index on all three rotary axes
+        # the official implementation passes no position_ids, so each token's position is its index in the
+        # sequence on all three rotary axes (plain 1D positions, not Qwen2-VL's M-RoPE); pass the same
         position_ids = torch.arange(input_ids.shape[1], device=self.device).view(1, 1, -1)
         position_ids = position_ids.expand(3, input_ids.shape[0], -1)
         hidden_states = self.model(

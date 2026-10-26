@@ -1,8 +1,7 @@
 """SD3.5-medium HPSv3 GRPO through the sglang-diffusion /rollout/generate path.
 
-8-GPU colocate: FSDP DP=8, eight rollout engines, and two HPSv3 workers share the same GPUs; each
-HPSv3 worker keeps ~14.5 GiB of Qwen2-VL-7B weights resident on its GPU. Flow-GRPO-Fast: SDE and
-training on denoising steps 3 and 4 only, as in run_diffusion_grpo_pickscore_5gpu_flowgrpo_aligned.py.
+2-GPU colocate: FSDP DP=2, two rollout engines, and one HPSv3 worker share the same GPUs; the
+HPSv3 worker keeps ~14.5 GiB of Qwen2-VL-7B weights resident on one of them.
 
 SD3.5 is gated, so HF_TOKEN must be set even when the weights are cached — sglang still
 fetches model_index.json from the hub at startup.
@@ -51,7 +50,7 @@ def execute(args: ScriptArgs, data_dir: str) -> None:
         "--rollout-function-path miles.rollout.sglang_diffusion_rollout.generate_rollout "
         f"--prompt-data {data_dir}/train.jsonl "
         "--input-key input "
-        "--rollout-batch-size 16 "
+        "--rollout-batch-size 8 "
         "--n-samples-per-prompt 16 "
         f"--num-rollout {args.num_rollout} "
         "--global-batch-size 64 "
@@ -64,8 +63,8 @@ def execute(args: ScriptArgs, data_dir: str) -> None:
         "--diffusion-height 512 "
         "--diffusion-width 512 "
         "--diffusion-step-strategy-path miles.rollout.step_strategy_hub.sde_window "
-        "--diffusion-num-sde-steps 2 "
-        "--diffusion-sde-window-range 3,5 "
+        "--diffusion-num-sde-steps 10 "
+        "--diffusion-sde-window-range 0,10 "
     )
 
     eval_args = "--diffusion-eval-num-steps 40 "
@@ -76,7 +75,7 @@ def execute(args: ScriptArgs, data_dir: str) -> None:
 
     lora_args = "--use-lora --lora-ipc-weight-sync --lora-rank 32 --lora-alpha 64 --lora-init-weights gaussian "
 
-    reward_args = "--rm-type hpsv3 " "--hpsv3-num-workers 2 " "--hpsv3-batch-size 8 " "--hpsv3-reward-colocate "
+    reward_args = "--rm-type hpsv3 " "--hpsv3-num-workers 1 " "--hpsv3-batch-size 8 " "--hpsv3-reward-colocate "
 
     wandb_args = U.get_default_wandb_args(
         __file__, run_id=run_name, project=WANDB_PROJECT, wandb_log_num_images=8, wandb_log_image_interval=10
@@ -92,13 +91,13 @@ def execute(args: ScriptArgs, data_dir: str) -> None:
 
     train_backend_args = "--train-backend fsdp --diffusion-forward-dtype fp16 "
 
-    perf_args = "--gradient-checkpointing --micro-batch-size-sample 8 --micro-batch-size-tstep 2 "
+    perf_args = "--gradient-checkpointing --micro-batch-size-sample 16 --micro-batch-size-tstep 5 "
 
     misc_args = (
-        "--actor-num-gpus-per-node 8 "
-        "--rollout-num-gpus 8 "
+        "--actor-num-gpus-per-node 2 "
+        "--rollout-num-gpus 2 "
         "--rollout-num-gpus-per-engine 1 "
-        "--num-gpus-per-node 8 "
+        "--num-gpus-per-node 2 "
         "--colocate "
         "--deterministic-mode "
     ) + ("--diffusion-debug-mode --debug-skip-optimizer-step " if args.debug_alignment else "")
@@ -109,7 +108,7 @@ def execute(args: ScriptArgs, data_dir: str) -> None:
             f"{lora_args} {reward_args} {wandb_args} {sglang_args} {train_backend_args} {perf_args} "
             f"{misc_args} {args.extra_args}"
         ),
-        num_gpus_per_node=8,
+        num_gpus_per_node=2,
         config=args,
         extra_env_vars={
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",

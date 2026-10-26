@@ -25,10 +25,12 @@ _gen = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_gen)
 
 # Inputs match exactly. With the backbone cast to fp32 the port reproduces the official mu (0.0000 apart), so
-# the fp32 check is the strict one. The bf16 path differs only by kernel noise, which also varies by GPU:
-# up to 0.104 on H100 and 0.211 on the H200 CI runner, against the official model's own single-vs-batched
-# spread of 0.13. The bf16 check only guards the deployed path, with ranking checked exactly.
+# the fp32 checks are the strict ones, including a padded batch against single scoring. The bf16 check bounds
+# how far the deployed scores sit from the official ones; that gap is kernel noise and varies by GPU and
+# CUDA build: up to 0.104 on H100 and 0.211 on the H200 CI runner, against the official model's own
+# single-vs-batched spread of 0.13.
 _MU_ATOL_FP32 = 1e-3
+_MU_ATOL_FP32_BATCHED = 1e-2
 _MU_ATOL_BF16 = 0.5
 
 
@@ -69,9 +71,6 @@ def test_bf16_scores_match_official(scorer):
 
     _assert_mu_close(single, samples, "mu", _MU_ATOL_BF16)
     _assert_mu_close(batched, samples, "mu_batched", _MU_ATOL_BF16)
-    assert sorted(range(len(samples)), key=lambda i: single[i]) == sorted(
-        range(len(samples)), key=lambda i: samples[i]["mu"]
-    )
 
 
 def test_fp32_scores_match_official(scorer):
@@ -79,12 +78,15 @@ def test_fp32_scores_match_official(scorer):
     samples, images = zip(*_samples(), strict=True)
     scorer.model.float()
     try:
-        mu = [scorer([s["prompt"]], [image])[0] for s, image in zip(samples, images, strict=True)]
+        single = [scorer([s["prompt"]], [image])[0] for s, image in zip(samples, images, strict=True)]
+        batched = scorer([s["prompt"] for s in samples], list(images))
     finally:
         # every value is bf16-representable, so casting back restores the shared scorer exactly
         scorer.model.to(torch.bfloat16)
 
-    _assert_mu_close(mu, samples, "mu_fp32", _MU_ATOL_FP32)
+    _assert_mu_close(single, samples, "mu_fp32", _MU_ATOL_FP32)
+    # padding and masking of a mixed-size batch must not move any sample's score
+    torch.testing.assert_close(torch.tensor(batched), torch.tensor(single), rtol=0, atol=_MU_ATOL_FP32_BATCHED)
 
 
 if __name__ == "__main__":

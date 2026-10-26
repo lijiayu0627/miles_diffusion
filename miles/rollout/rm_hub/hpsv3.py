@@ -191,7 +191,6 @@ class HPSv3RewardActor:
         self.scorer = HPSv3Scorer(device="cuda" if use_cuda else "cpu", **scorer_kwargs)
 
     def score_batch(self, outputs: list[torch.Tensor], prompts: list[str]) -> list[float]:
-        # round like hps / openai_api, which matches the PNG files the official scorer reads
         images = []
         for output in outputs:
             if output.shape[1] != 1:

@@ -108,27 +108,21 @@ Example from `scripts/run_diffusion_grpo_sd3_hps_sglang.py`:
 
 Implementation: `miles/rollout/rm_hub/hpsv3.py`.
 
-[HPSv3](https://github.com/MizzenAI/HPSv3) is Qwen2-VL-7B-Instruct fine-tuned as a preference model:
-the image and a fixed rubric containing the prompt end in a `<|Reward|>` token, and a small MLP
-head on that token's hidden state outputs a preference mean μ and an uncertainty σ. The reward is μ, as in the official
-inferencer; σ is unused.
+[HPSv3](https://github.com/MizzenAI/HPSv3) scores human preference with a fine-tuned Qwen2-VL:
 
-- Weights: `MizzenAI/HPSv3` (`HPSv3.safetensors`, full bf16 model), or `--hpsv3-checkpoint-path`
-- Config / tokenizer / processor: `Qwen/Qwen2-VL-7B-Instruct` (its weights are not loaded). The
-  checkpoint repo has none of these, and its own `config.json` says Qwen2.5-VL while the weights are
-  Qwen2-VL. Offline, cache those Qwen2-VL files (not its weights) in the Hugging Face cache and set
-  `HF_HUB_OFFLINE=1`.
-- Images are resized to ~256 visual tokens (`256·28·28` pixels, aspect ratio kept).
+- Model: Qwen2-VL-7B-Instruct plus an MLP head on the hidden state of a `<|Reward|>` token that ends a fixed rubric prompt
+- Checkpoint: `--hpsv3-checkpoint-path` (optional; defaults to `HPSv3.safetensors` from `MizzenAI/HPSv3`)
+- Config, tokenizer and processor: `Qwen/Qwen2-VL-7B-Instruct` (its weights are not loaded)
 
-The official package pins `transformers==4.45.2`, so this is a port onto miles' transformers
-rather than a dependency. It reproduces the official scorer's quirks that the checkpoint was
-trained with: 1D rotary positions instead of Qwen2-VL's M-RoPE, rotary frequencies rounded to
-bf16, and an fp32 head. `tests/fast-gpu/test_hpsv3_alignment.py` checks it against scores recorded
-with the official package (`tests/fixtures/gen_hpsv3_reference.py`): identical model inputs, μ within
-1e-3 with the backbone in fp32, and within the cross-release bf16 kernel noise (≈0.1) as deployed.
+Scoring formula:
 
-μ is an unbounded logit: on SD3.5-medium GRPO rollouts (512², 10 steps) it spanned about −10 to
-+16 with a per-rollout mean of 8–10 and std 5–6. It accepts image outputs only (one frame).
+```
+(mu, sigma) = rm_head(hidden_state[<|Reward|>]);  score = mu
+```
+
+μ is unbounded, roughly −10 to +16 on SD3.5-medium rollouts. Images are resized to ~256 visual
+tokens. `tests/fast-gpu/test_hpsv3_alignment.py` checks the scores against the official package.
+It accepts image outputs only (one frame).
 
 | Flag | Default | Description |
 |---|---|---|
@@ -137,10 +131,6 @@ with the official package (`tests/fixtures/gen_hpsv3_reference.py`): identical m
 | `--hpsv3-batch-size` | 8 | Batch size per actor call |
 | `--hpsv3-checkpoint-path` | None | Local `HPSv3.safetensors`; unset downloads from `MizzenAI/HPSv3` |
 | `--hpsv3-reward-colocate` | False | Seat the `--hpsv3-num-workers` actors on rollout GPUs, one per placement-group bundle (requires `--colocate`) |
-
-Each worker keeps ~14.5 GiB of weights resident; on an H100 with sdpa a call takes ~65 ms at batch
-1 and ~47 ms per image from batch 8 (peak 15.4 GiB). When colocated that memory sits on a rollout
-GPU next to the train actor and the engine, and Ray does not account for it.
 
 Example from `scripts/run_diffusion_grpo_sd3_hpsv3_sglang.py`:
 

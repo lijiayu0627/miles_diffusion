@@ -1,7 +1,6 @@
 """SD3.5-medium HPSv3 GRPO through the sglang-diffusion /rollout/generate path.
 
-2-GPU colocate: FSDP DP=2, two rollout engines, and one HPSv3 worker share the same GPUs; the
-HPSv3 worker keeps ~14.5 GiB of Qwen2-VL-7B weights resident on one of them.
+2-GPU colocate: FSDP DP=2, two rollout engines, and one HPSv3 worker share the same GPUs.
 
 SD3.5 is gated, so HF_TOKEN must be set even when the weights are cached — sglang still
 fetches model_index.json from the hub at startup.

@@ -1503,9 +1503,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 "--hpsv3-reward-colocate",
                 action="store_true",
                 default=False,
-                help="Seat HPSv3 actors on the rollout GPUs, one per placement-group bundle. Requires --colocate. "
-                "Each actor keeps ~14.5 GiB of Qwen2-VL-7B weights resident there (~24 GiB peak at batch size 8), "
-                "which Ray does not account for.",
+                help="Seat HPSv3 actors on the rollout GPUs, one per placement-group bundle. Requires --colocate.",
             )
             parser.add_argument(
                 "--hpsv3-batch-size",

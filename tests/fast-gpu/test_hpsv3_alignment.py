@@ -1,7 +1,7 @@
 from tests.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(
-    est_time=300,
+    est_time=600,
     suite="stage-b-3-gpu-h200",
     labels=[],
 )
@@ -9,6 +9,12 @@ register_cuda_ci(
 import hashlib
 import importlib.util
 import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -16,80 +22,112 @@ import torch
 
 from miles.rollout.rm_hub.hpsv3 import HPSv3Scorer
 
-# Recorded by tests/fixtures/gen_hpsv3_reference.py with the official package (transformers 4.45.2), which
-# cannot be installed next to miles; its docstring has the environment.
+# The official HPSv3 code needs transformers 4.45, which cannot share miles' environment, so the reference
+# scores come from a subprocess that runs it with its pins in a directory of their own, on miles' own torch
+# and CUDA. Same GPU, same kernels: in bf16, as deployed, the port must match it bit for bit, single and
+# batched. fp32 shows op-order differences between transformers 4.45 and 5 that bf16 rounds away (up to
+# 1.2e-5 measured); a logic error moves mu by 1e-2 or more, so fp32 keeps a 1e-4 tolerance.
+_MU_ATOL_FP32 = 1e-4
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-_REFERENCE = json.loads((_FIXTURES / "hpsv3_reference.json").read_text())
-_spec = importlib.util.spec_from_file_location("gen_hpsv3_reference", _FIXTURES / "gen_hpsv3_reference.py")
-_gen = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_gen)
+_OFFICIAL_SCRIPT = _FIXTURES / "hpsv3_official_scores.py"
+_spec = importlib.util.spec_from_file_location("hpsv3_official_scores", _OFFICIAL_SCRIPT)
+_official = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_official)
+# tokenizers ships a compiled extension, so the directory is per interpreter and machine as well as per pins
+_OVERLAY_KEY = hashlib.sha256(
+    " ".join([*_official.OFFICIAL_PINS, sys.implementation.cache_tag, platform.machine()]).encode()
+).hexdigest()[:12]
+_OVERLAY = Path.home() / ".cache" / "miles" / f"hpsv3_official_{_OVERLAY_KEY}"
 
-# Inputs match exactly. With the backbone cast to fp32 the port reproduces the official mu (0.0000 apart), so
-# the fp32 checks are the strict ones, including a padded batch against single scoring. The bf16 check bounds
-# how far the deployed scores sit from the official ones; that gap is kernel noise and varies by GPU and
-# CUDA build: up to 0.104 on H100 and 0.211 on the H200 CI runner, against the official model's own
-# single-vs-batched spread of 0.13.
-_MU_ATOL_FP32 = 1e-3
-_MU_ATOL_FP32_BATCHED = 1e-2
-_MU_ATOL_BF16 = 0.5
+
+def _install_official_overlay() -> Path:
+    """pip install the official pins into their own directory; the running environment is never touched."""
+    if _OVERLAY.is_dir():
+        return _OVERLAY
+    _OVERLAY.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix="hpsv3_official_", dir=_OVERLAY.parent))
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "--no-deps", "--target", str(staging)]
+        + _official.OFFICIAL_PINS,
+        check=True,
+    )
+    try:
+        staging.rename(_OVERLAY)
+    except OSError:  # a concurrent run finished first
+        shutil.rmtree(staging, ignore_errors=True)
+    return _OVERLAY
+
+
+@pytest.fixture(scope="module")
+def official(tmp_path_factory):
+    overlay = _install_official_overlay()
+    output = tmp_path_factory.mktemp("hpsv3_official") / "scores.json"
+    pythonpath = os.pathsep.join(filter(None, [str(overlay), os.environ.get("PYTHONPATH")]))
+    subprocess.run(
+        [sys.executable, str(_OFFICIAL_SCRIPT), "--output", str(output)],
+        env={**os.environ, "PYTHONPATH": pythonpath},
+        check=True,
+    )
+    scores = json.loads(output.read_text())
+    assert scores["versions"]["transformers"] == "4.45.2" and scores["attn_implementation"] == "sdpa"
+    return scores
+
+
+@pytest.fixture(scope="module")
+def scorer(official):
+    # built after the official subprocess has exited, so the two models never share the GPU
+    return HPSv3Scorer(device="cuda")
 
 
 def _sha256(tensor: torch.Tensor) -> str:
     return hashlib.sha256(tensor.detach().float().cpu().contiguous().numpy().tobytes()).hexdigest()
 
 
-@pytest.fixture(scope="module")
-def scorer():
-    return HPSv3Scorer(device="cuda")
+def _images(official):
+    return [_official.make_image(s["width"], s["height"], s["offset"]) for s in official["samples"]]
 
 
-def _samples():
-    for sample in _REFERENCE["samples"]:
-        yield sample, _gen.make_image(sample["width"], sample["height"], sample["offset"])
+def _assert_close(actual, official, key, atol=0.0):
+    expected = [s[key] for s in official["samples"]]
+    torch.testing.assert_close(torch.tensor(actual), torch.tensor(expected), rtol=0, atol=atol, msg=key)
 
 
-def test_inputs_match_official(scorer):
+def test_inputs_match_official(scorer, official):
     """Prompt template, tokenizer, <|Reward|> id, resize and normalisation all reproduce the official batch."""
-    for sample, image in _samples():
+    for sample, image in zip(official["samples"], _images(official), strict=True):
         inputs = scorer.build_inputs([sample["prompt"]], [image])
         assert inputs["input_ids"][0].tolist() == sample["input_ids"]
         assert inputs["image_grid_thw"][0].tolist() == sample["image_grid_thw"]
         assert list(inputs["pixel_values"].shape) == sample["pixel_values_shape"]
         assert _sha256(inputs["pixel_values"]) == sample["pixel_values_sha256"]
-    assert scorer.reward_token_id == _REFERENCE["runtime"]["reward_token_id"]
+    assert scorer.reward_token_id == official["reward_token_id"]
 
 
-def _assert_mu_close(actual, samples, key, atol):
-    torch.testing.assert_close(torch.tensor(actual), torch.tensor([s[key] for s in samples]), rtol=0, atol=atol)
-
-
-def test_bf16_scores_match_official(scorer):
-    samples, images = zip(*_samples(), strict=True)
-    single = [scorer([s["prompt"]], [image])[0] for s, image in zip(samples, images, strict=True)]
+def _score_single_and_batched(scorer, official):
+    prompts = [s["prompt"] for s in official["samples"]]
+    images = _images(official)
+    single = [scorer([p], [image])[0] for p, image in zip(prompts, images, strict=True)]
     # one right-padded batch of mixed image sizes, as the reward actors send it
-    batched = scorer([s["prompt"] for s in samples], list(images))
-
-    _assert_mu_close(single, samples, "mu", _MU_ATOL_BF16)
-    _assert_mu_close(batched, samples, "mu_batched", _MU_ATOL_BF16)
+    return single, scorer(prompts, images)
 
 
-def test_fp32_scores_match_official(scorer):
-    """Same bf16-rounded weights and rotary buffers in fp32 math: a wrong layer, mask or rotary shows up here."""
-    samples, images = zip(*_samples(), strict=True)
+def test_bf16_scores_match_official(scorer, official):
+    single, batched = _score_single_and_batched(scorer, official)
+    _assert_close(single, official, "mu")
+    _assert_close(batched, official, "mu_batched")
+
+
+def test_fp32_scores_match_official(scorer, official):
+    """Same bf16-rounded weights and rotary buffers in fp32 math."""
     scorer.model.float()
     try:
-        single = [scorer([s["prompt"]], [image])[0] for s, image in zip(samples, images, strict=True)]
-        batched = scorer([s["prompt"] for s in samples], list(images))
+        single, batched = _score_single_and_batched(scorer, official)
     finally:
         # every value is bf16-representable, so casting back restores the shared scorer exactly
         scorer.model.to(torch.bfloat16)
-
-    _assert_mu_close(single, samples, "mu_fp32", _MU_ATOL_FP32)
-    # padding and masking of a mixed-size batch must not move any sample's score
-    torch.testing.assert_close(torch.tensor(batched), torch.tensor(single), rtol=0, atol=_MU_ATOL_FP32_BATCHED)
+    _assert_close(single, official, "mu_fp32", _MU_ATOL_FP32)
+    _assert_close(batched, official, "mu_batched_fp32", _MU_ATOL_FP32)
 
 
 if __name__ == "__main__":
-    import sys
-
     sys.exit(pytest.main([__file__, "-v", "-s"]))

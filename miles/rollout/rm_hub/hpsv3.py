@@ -8,6 +8,7 @@ token; an MLP head on that token's last hidden state outputs a preference mean a
 from __future__ import annotations
 
 import math
+import types
 from collections.abc import Sequence
 
 import ray
@@ -106,6 +107,25 @@ def _build_rm_head(hidden_size: int) -> torch.nn.Sequential:
     )
 
 
+def _official_vision_attention(self, hidden_states, cu_seqlens, position_embeddings=None, **kwargs):
+    """Qwen2-VL vision attention as the official implementation computes it: one sdpa call over every image's
+    patches with a block-diagonal mask. transformers 5 instead calls sdpa per image without a mask, which picks
+    a different kernel and moves bf16 scores by up to ~0.2; this keeps single and batched scores identical to
+    the official ones. Bound to each vision block's ``attn`` in place of its own forward."""
+    from transformers.models.qwen2_vl.modeling_qwen2_vl import apply_rotary_pos_emb_vision
+
+    seq_length = hidden_states.shape[0]
+    q, k, v = self.qkv(hidden_states).reshape(seq_length, 3, self.num_heads, -1).permute(1, 0, 2, 3).unbind(0)
+    q, k = apply_rotary_pos_emb_vision(q, k, *position_embeddings)
+    mask = torch.zeros([1, seq_length, seq_length], device=q.device, dtype=torch.bool)
+    for i in range(1, len(cu_seqlens)):
+        mask[..., cu_seqlens[i - 1] : cu_seqlens[i], cu_seqlens[i - 1] : cu_seqlens[i]] = True
+    out = torch.nn.functional.scaled_dot_product_attention(
+        q.transpose(0, 1), k.transpose(0, 1), v.transpose(0, 1), mask, dropout_p=0.0
+    )
+    return self.proj(out.transpose(0, 1).reshape(seq_length, -1))
+
+
 class HPSv3Scorer(torch.nn.Module):
     """HPSv3 scorer for aligned prompt/image batches; returns the preference mean (mu) per pair."""
 
@@ -140,11 +160,14 @@ class HPSv3Scorer(torch.nn.Module):
             # the official implementation uses flash-attn 2 when installed and sdpa otherwise; we always use
             # sdpa, which the alignment test checks against the official scores
             self.model = Qwen2VLModel._from_config(config, attn_implementation="sdpa", dtype=torch.bfloat16)
+            for block in self.model.visual.blocks:
+                block.attn.forward = types.MethodType(_official_vision_attention, block.attn)
             # the official implementation casts the whole model to bf16 after building it, which also rounds the
             # rotary position frequencies (inv_freq buffers) to bf16; dtype= above keeps them fp32, which would
             # shift mu by up to ~0.2, so cast the same way
             self.model.to(torch.bfloat16)
-            # the head stays fp32 as in the official implementation; forward feeds it the hidden state in fp32
+            # the head stays fp32 as in the official implementation; forward runs it on every token's hidden
+            # state in fp32 and reads the <|Reward|> row, the same matmul shape as the official one
             self.rm_head = _build_rm_head(config.text_config.hidden_size)
 
         if checkpoint_path is None:
@@ -184,7 +207,7 @@ class HPSv3Scorer(torch.nn.Module):
         reward_mask = input_ids == self.reward_token_id
         if not torch.all(reward_mask.sum(dim=-1) == 1):
             raise RuntimeError(f"expected exactly one {_REWARD_TOKEN} per sample")
-        logits = self.rm_head(hidden_states[reward_mask].float())
+        logits = self.rm_head(hidden_states.float())[reward_mask]
         return [float(mu) for mu in logits[:, 0].cpu()]
 
 

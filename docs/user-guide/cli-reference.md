@@ -311,7 +311,7 @@ See [Dtype Control](../advanced/dtype-control.md).
 | `--hps-checkpoint-path` | str | – | Local checkpoint; unset downloads from Hugging Face. |
 | `--hpsv3-num-workers` | int | `1` | |
 | `--hpsv3-num-gpus-per-worker` | float | `1.0` | Standalone workers only; fractional values allowed. |
-| `--hpsv3-reward-colocate` | flag | off | Seats `--hpsv3-num-workers` actors on the rollout GPUs, one per placement-group bundle, sharing them with the train actor and rollout engine. Requires `--colocate`. Each actor keeps ~14.5 GiB resident there, which Ray does not account for. |
+| `--hpsv3-reward-colocate` | flag | off | Seats `--hpsv3-num-workers` actors on the rollout GPUs, one per placement-group bundle, sharing them with the train actor and rollout engine. Requires `--colocate`. Each actor keeps ~14.5 GiB resident there (~24 GiB peak at batch size 8), which Ray does not account for. |
 | `--hpsv3-batch-size` | int | `8` | |
 | `--hpsv3-checkpoint-path` | str | – | Local `HPSv3.safetensors`; unset downloads from `MizzenAI/HPSv3`. |
 | `--ocr-num-workers` | int | `4` | |
